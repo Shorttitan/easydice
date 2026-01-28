@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TRPG 骰子助手 v01</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- 引入 Babel 用于浏览器内编译 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* 防止手机双击缩放和长按选中 */
+        body {
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* 自定义震动动画 */
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        
+        .animate-shake {
+            animation: shake 0.5s;
+            animation-iteration-count: infinite;
+        }
+
+        /* 结果弹出动画 */
+        @keyframes pop {
+            0% { transform: scale(0.5); opacity: 0; }
+            70% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop {
+            animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- 基础图标组件 ---
+        const Icon = ({ children, size = 24, className = "", ...props }) => (
+            <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width={size} 
+                height={size} 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={className}
+                {...props}
+            >
+                {children}
+            </svg>
+        );
+
+        // --- 骰子形状图标 ---
+        const DieShapes = {
+            d4: (props) => <Icon {...props} viewBox="0 0 24 24"><path d="M12 2L2 22h20L12 2z"/></Icon>,
+            d6: (props) => <Icon {...props}><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></Icon>,
+            d8: (props) => <Icon {...props}><path d="M12 2L2 12l10 10 10-10L12 2z"/><path d="M2 12h20"/><path d="M12 2v20"/></Icon>,
+            d10: (props) => <Icon {...props}><path d="M12 2L2 12l10 10 10-10L12 2z"/><line x1="12" y1="22" x2="12" y2="2"/></Icon>, // 简化风筝形
+            d12: (props) => <Icon {...props}><path d="M12 2l8.5 6.18L17.25 21H6.75L3.5 8.18 12 2z"/></Icon>, // 五边形近似
+            d20: (props) => <Icon {...props}><path d="M12 2l8.66 5v10L12 22 3.34 17V7L12 2z"/><path d="M12 22V12"/><path d="M12 12L3.34 7"/><path d="M12 12l8.66-5"/></Icon>,
+            d100: (props) => <Icon {...props}><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></Icon>,
+        };
+
+        const Icons = {
+            Dices: (props) => (
+                <Icon {...props}>
+                    <rect width="12" height="12" x="2" y="10" rx="2" ry="2"/>
+                    <path d="m17.92 11.191-1.936-1.924a2.72 2.72 0 0 0-3.848 0L8.17 13.232"/>
+                </Icon>
+            ),
+            RotateCcw: (props) => (
+                <Icon {...props}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/></Icon>
+            ),
+            History: (props) => (
+                <Icon {...props}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/><polyline points="12 6 12 12 16 14"/></Icon>
+            ),
+            Trash2: (props) => (
+                <Icon {...props}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></Icon>
+            ),
+            Sparkles: (props) => (
+                <Icon {...props}><path d="m12 3-1.91 5.8a2 2 0 0 1-1.28 1.29L3 12l5.81 1.91c.53.17 1.11.17 1.64 0L16.29 12l-5.8-1.91a2 2 0 0 1-1.29-1.29L7.29 3z"/><path d="m20 16-1.91 5.8a2 2 0 0 1-1.28 1.29L11 25l5.81 1.91c.53.17 1.11.17 1.64 0L24.29 25l-5.8-1.91a2 2 0 0 1-1.29-1.29L15.29 16z"/></Icon>
+            ),
+            Skull: (props) => (
+                <Icon {...props}><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><path d="M8 20v2h8v-2"/><path d="m12.5 17-.5-1-.5 1h1z"/><path d="M16 20a2 2 0 0 0 1.56-3.25 8 8 0 1 0-11.12 0A2 2 0 0 0 8 20"/></Icon>
+            ),
+            X: (props) => (
+                <Icon {...props}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></Icon>
+            ),
+            Check: (props) => (
+                <Icon {...props}><path d="M20 6 9 17l-5-5"/></Icon>
+            )
+        };
+
+        // --- 主程序逻辑 ---
+        const App = () => {
+            const [dicePool, setDicePool] = useState({ 4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 20: 0, 100: 1 });
+            const [result, setResult] = useState(null);
+            const [rolling, setRolling] = useState(false);
+            const [displayNumber, setDisplayNumber] = useState(null); // 用于动画滚动的临时数字
+            const [history, setHistory] = useState([]);
+            const [showHistory, setShowHistory] = useState(false);
+            const [confirmClear, setConfirmClear] = useState(false);
+
+            const diceTypes = [
+                { label: 'd4', value: 4, color: 'bg-emerald-600', border: 'border-emerald-400', shape: DieShapes.d4 },
+                { label: 'd6', value: 6, color: 'bg-blue-600', border: 'border-blue-400', shape: DieShapes.d6 },
+                { label: 'd8', value: 8, color: 'bg-indigo-600', border: 'border-indigo-400', shape: DieShapes.d8 },
+                { label: 'd10', value: 10, color: 'bg-violet-600', border: 'border-violet-400', shape: DieShapes.d10 },
+                { label: 'd12', value: 12, color: 'bg-fuchsia-600', border: 'border-fuchsia-400', shape: DieShapes.d12 },
+                { label: 'd20', value: 20, color: 'bg-rose-600', border: 'border-rose-400', shape: DieShapes.d20 },
+                { label: 'd100', value: 100, color: 'bg-amber-600', border: 'border-amber-400', shape: DieShapes.d100 },
+            ];
+
+            const totalDiceCount = Object.values(dicePool).reduce((a, b) => a + b, 0);
+
+            // 获取当前选中的所有骰子列表（用于动画显示）
+            const getActiveDiceList = () => {
+                let list = [];
+                diceTypes.forEach(type => {
+                    const count = dicePool[type.value];
+                    for(let i=0; i<count; i++) {
+                        list.push(type);
+                    }
+                });
+                return list;
+            };
+
+            const getPoolDescription = () => {
+                const parts = [];
+                diceTypes.forEach(type => {
+                    const count = dicePool[type.value];
+                    if (count > 0) parts.push(`${count}${type.label}`);
+                });
+                return parts.length > 0 ? parts.join(' + ') : '请选择骰子';
+            };
+
+            const addDie = (faces) => setDicePool(prev => ({ ...prev, [faces]: (prev[faces] || 0) + 1 }));
+            const clearPool = () => { setDicePool({ 4: 0, 6: 0, 8: 0, 10: 0, 12: 0, 20: 0, 100: 0 }); setResult(null); setDisplayNumber(null); };
+
+            const rollDice = () => {
+                if (totalDiceCount === 0) return;
+                setRolling(true);
+                
+                // 动画逻辑：数字快速跳动
+                let interval = setInterval(() => {
+                    setDisplayNumber(Math.floor(Math.random() * 100) + 1);
+                }, 50);
+
+                setTimeout(() => {
+                    clearInterval(interval);
+                    
+                    let grandTotal = 0;
+                    const detailRolls = [];
+                    Object.entries(dicePool).forEach(([facesStr, count]) => {
+                        const faces = parseInt(facesStr);
+                        for (let i = 0; i < count; i++) {
+                            const val = Math.floor(Math.random() * faces) + 1;
+                            grandTotal += val;
+                            detailRolls.push({ type: faces, val: val });
+                        }
+                    });
+
+                    const isSingleD100 = dicePool[100] === 1 && totalDiceCount === 1;
+                    const newResult = {
+                        id: Date.now(),
+                        poolDescription: getPoolDescription(),
+                        details: detailRolls,
+                        total: grandTotal,
+                        timestamp: new Date().toLocaleTimeString(),
+                        critSuccess: isSingleD100 && grandTotal <= 5,
+                        critFail: isSingleD100 && grandTotal >= 96
+                    };
+                    
+                    setDisplayNumber(null);
+                    setResult(newResult);
+                    setHistory(prev => [newResult, ...prev]);
+                    setRolling(false);
+                }, 800); // 延长一点时间让动画飞一会
+            };
+
+            const clearAllHistory = () => { setHistory([]); setConfirmClear(false); };
+            const deleteHistoryItem = (e, id) => { e.stopPropagation(); setHistory(prev => prev.filter(item => item.id !== id)); };
+
+            // 渲染骰子视觉区域
+            const renderVisuals = () => {
+                const activeDice = getActiveDiceList();
+                
+                // 如果正在投掷，显示震动的骰子
+                if (rolling) {
+                    return (
+                        <div className="flex flex-wrap justify-center items-center gap-4 animate-shake transition-all p-4">
+                            {activeDice.slice(0, 12).map((die, idx) => ( // 最多显示12个图标防止拥挤
+                                <div key={idx} className={`text-white opacity-90 drop-shadow-lg`}>
+                                    <die.shape size={48} className="fill-white/20" />
+                                </div>
+                            ))}
+                            {activeDice.length > 12 && <span className="text-2xl font-bold">+</span>}
+                        </div>
+                    );
+                }
+
+                // 如果有结果，显示结果（不显示图标了，保持清爽，或者可以改为显示静止的骰子）
+                if (result) {
+                    return null; // 结果状态由下方的大数字接管
+                }
+
+                // 默认状态：显示当前池子里的静态图标
+                if (totalDiceCount > 0) {
+                    return (
+                        <div className="flex flex-wrap justify-center items-center gap-2 p-4 opacity-50">
+                            {activeDice.slice(0, 8).map((die, idx) => (
+                                <div key={idx} className="text-slate-500">
+                                    <die.shape size={32} />
+                                </div>
+                            ))}
+                            {activeDice.length > 8 && <span className="text-xl">...</span>}
+                        </div>
+                    );
+                }
+                
+                // 空状态
+                return (
+                    <div className="flex flex-col items-center gap-4 opacity-30">
+                        <Icons.Dices size={64} className="text-slate-600" />
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-900 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white flex flex-col">
+                    <header className="p-4 bg-slate-800 border-b border-slate-700 shadow-md flex justify-between items-center z-10">
+                        <div className="flex items-center gap-2">
+                            <Icons.Dices className="text-indigo-400" />
+                            <h1 className="font-bold text-lg tracking-wider">TRPG 骰子助手 <span className="text-xs text-slate-500 font-normal">dice01</span></h1>
+                        </div>
+                        <button onClick={() => setShowHistory(!showHistory)} className={`p-2 rounded-full transition-colors ${showHistory ? 'bg-indigo-600 text-white' : 'hover:bg-slate-700 text-slate-400'}`}>
+                            <Icons.History size={20} />
+                        </button>
+                    </header>
+
+                    <main className="flex-grow flex flex-col relative overflow-hidden">
+                        {/* 历史记录侧边栏 (保持不变) */}
+                        <div className={`absolute inset-y-0 right-0 w-full md:w-80 bg-slate-800/95 backdrop-blur-md border-l border-slate-700 transform transition-transform duration-300 z-20 flex flex-col ${showHistory ? 'translate-x-0' : 'translate-x-full'}`}>
+                            <div className="p-4 border-b border-slate-700 flex justify-between items-center h-16">
+                                <h2 className="font-semibold text-slate-300">投掷记录</h2>
+                                <div className="flex gap-2 items-center">
+                                    {confirmClear ? (
+                                        <div className="flex items-center bg-red-900/20 border border-red-900/50 rounded-lg px-1 py-0.5 animate-in slide-in-from-right-5 fade-in duration-200">
+                                            <span className="text-xs text-red-300 mx-2">确定清空?</span>
+                                            <button onClick={clearAllHistory} className="p-1.5 text-red-400 hover:bg-red-900/50 rounded-md transition-colors"><Icons.Check size={16} /></button>
+                                            <button onClick={() => setConfirmClear(false)} className="p-1.5 text-slate-400 hover:bg-slate-700 rounded-md transition-colors"><Icons.X size={16} /></button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <button onClick={() => setConfirmClear(true)} className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-md transition-colors disabled:opacity-30" title="清空历史" disabled={history.length === 0}><Icons.Trash2 size={18} /></button>
+                                            <button onClick={() => setShowHistory(false)} className="p-2 text-slate-400 hover:bg-slate-700 rounded-md md:hidden"><Icons.X size={18} /></button>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="flex-grow overflow-y-auto p-4 space-y-3">
+                                {history.length === 0 && <p className="text-center text-slate-500 mt-10">暂无记录</p>}
+                                {history.map((item) => (
+                                    <div key={item.id} className="bg-slate-700/50 p-3 rounded-lg border border-slate-600 text-sm shadow-sm relative group">
+                                        <button onClick={(e) => deleteHistoryItem(e, item.id)} className="absolute top-2 right-2 p-1 text-slate-500 hover:text-red-400 hover:bg-slate-600 rounded opacity-0 group-hover:opacity-100 transition-opacity"><Icons.X size={14} /></button>
+                                        <div className="flex justify-between text-slate-400 text-xs mb-1 pr-6">
+                                            <span>{item.timestamp}</span>
+                                            <span className="font-mono bg-slate-800 px-1 rounded">{item.poolDescription}</span>
+                                        </div>
+                                        <div className="flex justify-between items-end">
+                                            <div className="text-slate-400 truncate w-2/3 text-xs leading-relaxed">
+                                                {item.details.map((d, i) => <span key={i} className={i > 0 ? "ml-1" : ""}>{i > 0 && "+ "}[{d.val}]</span>)}
+                                            </div>
+                                            <div className={`text-xl font-bold ${item.critSuccess ? 'text-yellow-400' : item.critFail ? 'text-red-500' : 'text-white'}`}>= {item.total}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 主显示区域 */}
+                        <div className="flex-grow flex flex-col items-center justify-center p-4 space-y-6" onClick={() => showHistory && setShowHistory(false)}>
+                            <div className="relative w-full max-w-md aspect-square max-h-64 md:max-h-80 flex flex-col items-center justify-center">
+                                
+                                {/* 动画层：正在投掷时显示 */}
+                                {rolling && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
+                                        {renderVisuals()}
+                                        <div className="text-6xl font-black text-slate-500/50 mt-4 font-mono">{displayNumber}</div>
+                                    </div>
+                                )}
+
+                                {/* 结果层：投掷结束后显示 */}
+                                {!rolling && result && (
+                                    <div className="animate-pop flex flex-col items-center">
+                                        <div className={`text-8xl md:text-9xl font-black tracking-tighter drop-shadow-2xl transition-all duration-300 transform scale-100 ${result.critSuccess ? 'text-yellow-400' : result.critFail ? 'text-red-500' : 'text-white'}`}>
+                                            {result.total}
+                                        </div>
+                                        {result.critSuccess && <div className="absolute -top-6 animate-bounce flex items-center gap-1 text-yellow-400 font-bold px-4 py-1 bg-yellow-400/10 rounded-full border border-yellow-400/20 shadow-lg backdrop-blur-sm"><Icons.Sparkles size={18} /> 大成功</div>}
+                                        {result.critFail && <div className="absolute -top-6 animate-bounce flex items-center gap-1 text-red-500 font-bold px-4 py-1 bg-red-500/10 rounded-full border border-red-500/20 shadow-lg backdrop-blur-sm"><Icons.Skull size={18} /> 大失败</div>}
+                                        
+                                        <div className="mt-4 flex flex-wrap justify-center gap-2 max-w-xs">
+                                            {result.details.map((roll, idx) => (
+                                                <span key={idx} className={`px-2 py-0.5 rounded text-sm font-mono border flex items-center gap-1 ${roll.val === roll.type ? 'text-green-400 border-green-900 bg-green-900/20' : roll.val === 1 ? 'text-red-400 border-red-900 bg-red-900/20' : 'text-slate-400 border-slate-700 bg-slate-800'}`}>
+                                                    d{roll.type}:{roll.val}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* 待机层：既没在投，也没有结果，或者刚选好骰子 */}
+                                {!rolling && !result && (
+                                    <div className="flex flex-col items-center justify-center h-full w-full">
+                                        {renderVisuals()}
+                                        <div className="text-slate-500 text-lg mt-4">{totalDiceCount > 0 ? "准备就绪" : "请选择骰子"}</div>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {/* 文本提示条 */}
+                            <div className="h-8 flex items-center justify-center">
+                                {!rolling && totalDiceCount > 0 && <div className="bg-slate-800/80 px-4 py-1.5 rounded-full border border-slate-600 text-indigo-300 font-mono text-sm tracking-wide shadow-sm">即将投掷: <span className="text-white font-bold">{getPoolDescription()}</span></div>}
+                            </div>
+                        </div>
+
+                        {/* 底部控制区 (保持不变) */}
+                        <div className="bg-slate-800 border-t border-slate-700 p-4 pb-8 md:pb-6 space-y-4 z-10 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
+                            <div className="max-w-3xl mx-auto w-full space-y-4">
+                                <div className="flex gap-3 items-stretch h-14">
+                                    <button onClick={clearPool} className="px-4 rounded-lg bg-slate-700 text-slate-400 hover:bg-red-900/30 hover:text-red-400 border border-slate-600 hover:border-red-800 transition-colors flex items-center justify-center" title="重置骰子池"><Icons.Trash2 size={20} /></button>
+                                    <button onClick={rollDice} disabled={rolling || totalDiceCount === 0} className={`flex-grow rounded-lg font-bold text-xl tracking-wider shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-3 ${rolling || totalDiceCount === 0 ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-500/20'}`}>
+                                        <Icons.RotateCcw size={24} className={rolling ? "animate-spin" : ""} />
+                                        {rolling ? '摇起来!' : '投掷!'}
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-4 md:grid-cols-7 gap-3 pt-1">
+                                    {diceTypes.map((type) => {
+                                        const count = dicePool[type.value];
+                                        return (
+                                            <button key={type.label} onClick={() => addDie(type.value)} className={`relative flex flex-col items-center justify-center h-16 rounded-xl transition-all duration-100 active:scale-95 touch-manipulation overflow-hidden ${count > 0 ? `${type.color} text-white shadow-lg ring-1 ring-white/20 translate-y-[-2px]` : 'bg-slate-700/50 border border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
+                                                {/* 背景装饰图标 */}
+                                                <type.shape size={48} className={`absolute -right-2 -bottom-2 opacity-10 rotate-12 ${count>0 ? 'opacity-30' : ''}`} />
+                                                <span className="font-bold font-mono text-lg z-10">{type.label}</span>
+                                                {count > 0 && <div className="absolute -top-2 -right-2 w-6 h-6 bg-white text-slate-900 rounded-full flex items-center justify-center font-bold text-xs shadow-md border-2 border-slate-800 animate-in zoom-in duration-200 z-10">{count}</div>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
